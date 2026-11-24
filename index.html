@@ -276,7 +276,7 @@ const MONTHS = ["január","február","március","április","május","június","j
 const DOW = ["H","K","Sze","Cs","P","Szo","V"];
 const DOW_LONG = ["vasárnap","hétfő","kedd","szerda","csütörtök","péntek","szombat"];
 
-const state = { events: [], cursor: new Date(), view: "month", enabled: loadFilters(), loaded: false, me: loadName(), key: loadKey(), adminPw: store("vesc-admin")||"", isAdmin: false };
+const state = { events: [], cursor: new Date(), view: "month", enabled: loadFilters(), loaded: false, me: loadName(), email: (store("vesc-email")||"").trim(), key: loadKey(), adminPw: store("vesc-admin")||"", isAdmin: false };
 state.cursor.setDate(1);
 
 function store(k, v){ try{ if(v===undefined) return localStorage.getItem(k); localStorage.setItem(k, v); }catch(e){ return null; } }
@@ -475,17 +475,24 @@ document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeModal(); });
 
 function askName(then){
   const inp=el("input",{maxlength:"40",placeholder:"pl. Gombi",value:state.me||""});
+  const inpMail=el("input",{type:"email",maxlength:"120",placeholder:"pl. nev@gmail.com",value:state.email||""});
   const err=el("div",{class:"err"});
   const form=el("form",{},
     el("div",{class:"body"}, el("p",{style:"margin:0;color:var(--muted)"},"A neved látszik majd a szervezőnél és a jelentkezőknél. Ezen az eszközön megjegyzem."),
       el("label",{class:"f"},"Neved",inp),
+      el("label",{class:"f"},"E-mail cím (nem kötelező)",inpMail),
+      el("p",{class:"muted",style:"margin:-6px 0 0;font-size:12px"},"Ha megadod, értesítünk, ha egy esemény, amire jelentkeztél, időpontot vagy helyszínt változtat, vagy elmarad. A címed senkinek nem látszik."),
       keySection(), err),
     el("footer",{}, el("button",{class:"btn",type:"button",onclick:closeModal},"Mégse"), el("button",{class:"btn dark",type:"submit"},"Mentés")));
-  form.addEventListener("submit",ev=>{
+  form.addEventListener("submit",async ev=>{
     ev.preventDefault();
     const v=inp.value.replace(/;/g,",").trim();
+    const m=inpMail.value.trim();
     if(!v){ err.textContent="Írd be a neved."; return; }
-    state.me=v; store("vesc-name",v); renderMe();
+    if(m && !/^[^\s@;,]+@[^\s@;,]+\.[^\s@;,]+$/.test(m)){ err.textContent="Ez nem tűnik érvényes e-mail címnek."; return; }
+    const mailChanged = m!==(state.email||"") || v!==(state.me||"");
+    state.me=v; store("vesc-name",v); state.email=m; store("vesc-email",m); renderMe();
+    if(mailChanged && m){ try{ apply(await call("setMyEmail", v, m, auth())); }catch(_){ } }
     if(then) then(); else closeModal();
   });
   openModal("Hogy hívnak?", form);
@@ -711,14 +718,15 @@ function openDetail(id){
       el("div",{class:"line"},el("span",{class:"k"},"👤"),el("span",{},"Szervező: "+(e.organizer||"–"))),
       el("div",{},
         el("p",{class:"section-title",style:"margin:6px 0 6px"},`Jönnek (${going.length})`),
-        going.length ? el("div",{class:"att"},going.map(g=>el("span",{},g))) : el("div",{class:"empty"},"Még senki nem jelentkezett.")),
+        going.length ? el("div",{class:"att"},going.map(g=>el("span",{},g))) : el("div",{class:"empty"},"Még senki nem jelentkezett."),
+        iGo(e) && !state.email && el("p",{class:"muted",style:"margin:6px 0 0;font-size:12px"},"Tipp: add meg az e-mail címed (bal oldalt: Neved → módosít), és szólunk, ha ez az esemény változik vagy elmarad.")),
       err));
   const del=el("button",{class:"btn danger"},"Törlés");
   if(!e.canManage) del.style.display="none";
   let armed=false;
   const doDelete=async(scope)=>{
     box.querySelectorAll("footer button").forEach(b=>b.disabled=true);
-    try{ apply(await call("deleteEvent", e.id, auth(), scope)); closeModal(); renderAll(); }
+    try{ apply(await call("deleteEvent", e.id, auth(), scope, state.me)); closeModal(); renderAll(); }
     catch(x){ err.textContent=msg(x); box.querySelectorAll("footer button").forEach(b=>b.disabled=false); }
   };
   del.onclick=()=>{
@@ -730,14 +738,14 @@ function openDetail(id){
         el("button",{class:"btn danger confirm",onclick:()=>doDelete("future")},"Ezt és a következőket"));
       return;
     }
-    if(!armed){ armed=true; del.textContent="Biztosan törlöd?"; del.classList.add("confirm"); return; }
+    if(!armed){ armed=true; del.textContent=(e.attendees||[]).length>1?"Biztosan törlöd? (a jelentkezők értesítést kapnak)":"Biztosan törlöd?"; del.classList.add("confirm"); return; }
     doDelete("one");
   };
   const mine=iGo(e);
   const join=el("button",{class:"btn dark"}, mine?"Mégsem jövök":"Jövök! 🙋");
   join.onclick=()=>needName(async()=>{
     join.disabled=true;
-    try{ apply(await call("setAttendance", e.id, state.me, !iGo(e), auth())); renderAll(); openDetail(e.id); }
+    try{ apply(await call("setAttendance", e.id, state.me, !iGo(e), auth(), state.email)); renderAll(); openDetail(e.id); }
     catch(x){ openDetail(e.id); }
   });
   box.append(el("footer",{}, del, el("span",{class:"spacer"}),
@@ -881,7 +889,7 @@ function openForm(existing, dateKey, presetSport){
       return;
     }
     const data={id:existing?existing.id:"",sport,raceType,title:iTitle.value.trim(),date:iDate.value,endDate,start:allDay?"":iStart.value,end:allDay?"":iEnd.value,
-      place:iPlace.value.trim(),distance:iDist.value.trim(),desc:iDesc.value.trim(),link:iLink.value.trim(),organizer:state.me};
+      place:iPlace.value.trim(),distance:iDist.value.trim(),desc:iDesc.value.trim(),link:iLink.value.trim(),organizer:state.me,email:state.email};
     save.disabled=true; save.textContent="Mentés…";
     try{
       apply(await call("saveEvent", data, auth(), {repeatUntil: repeating?iUntil.value:"", scope}));
