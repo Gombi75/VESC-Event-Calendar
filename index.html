@@ -127,6 +127,9 @@
   .list-head{display:block;width:100%;text-align:left;background:none;border:0;padding:14px 18px 2px;font-size:15px;font-weight:700}
   .list-head.toggle{color:var(--muted);border-top:1px solid var(--line);margin-top:10px;padding-top:14px;cursor:pointer}
   .list-day.dim,.list-ev.dim{opacity:.6}
+  .timehint:empty{display:none}
+  .timehint{margin-top:-6px}
+  input.bad{border-color:#c0392b !important;background:#fdecec}
   .linkprev{display:block;margin-top:6px;font-size:12.5px;color:var(--swim);word-break:break-all}
   .repeat{background:var(--soft);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
   .chk{display:flex;gap:8px;align-items:center;font-size:13.5px;cursor:pointer}
@@ -872,7 +875,24 @@ function openForm(existing, dateKey, presetSport){
   const err=el("div",{class:"err"});
   const save=el("button",{class:"btn dark",type:"submit"},existing?"Mentés":"Hozzáadás");
   const timeRow=el("div",{class:"row"},f(isRace?"Rajt":"Kezdés",iStart),f("Vége",iEnd));
-  const syncAllDay=()=>{ timeRow.style.display=iAllDay.checked?"none":""; };
+  const timeHint=el("div",{class:"err timehint"});
+  // időpontok ellenőrzése: azonnal jelez, és mentéskor is ezt használjuk
+  function timeProblem(){
+    if(iAllDay.checked) return "";
+    const multi = iEndDate.value && iEndDate.value>iDate.value;
+    if(iEnd.value && !iStart.value) return "Add meg a kezdés időpontját is (vagy pipáld be az „Egész nap” lehetőséget).";
+    if(!multi && iStart.value && iEnd.value && iEnd.value<=iStart.value) return "A befejezésnek a kezdés után kell lennie.";
+    return "";
+  }
+  function checkTimes(){
+    const m=timeProblem();
+    timeHint.textContent=m;
+    iEnd.classList.toggle("bad", !!m && !!iEnd.value);
+    const multi = iEndDate.value && iEndDate.value>iDate.value;
+    iEnd.min = (!multi && iStart.value) ? iStart.value : "";
+  }
+  [iStart,iEnd,iDate,iEndDate].forEach(x=>{ x.addEventListener("input",checkTimes); x.addEventListener("change",checkTimes); });
+  const syncAllDay=()=>{ timeRow.style.display=iAllDay.checked?"none":""; checkTimes(); };
   iAllDay.addEventListener("change",syncAllDay); syncAllDay();
   form.append(
     el("div",{class:"body"},
@@ -880,7 +900,7 @@ function openForm(existing, dateKey, presetSport){
       f(isRace?"Verseny neve":isSocial?"Program neve":"Megnevezés",iTitle),
       el("div",{class:"row"},f(isRace?"Dátum (első nap)":"Dátum (első nap)",iDate),f("Utolsó nap (ha több napos)",iEndDate)),
       el("label",{class:"chk"},iAllDay,"Egész nap (nincs pontos időpont)"),
-      timeRow,
+      timeRow, timeHint,
       isSocial ? f("Helyszín",iPlace) : el("div",{class:"row"},f("Helyszín",iPlace),f(isRace?"Táv":"Táv / jelleg",iDist)),
       (isRace||isSocial||e.link) && el("div",{},f("Link",iLink),linkPreview), f(isRace?"Megjegyzés":"Leírás",iDesc), repField, scopeField, pastBox, err),
     el("footer",{},el("button",{class:"btn",type:"button",onclick:()=>existing?openDetail(existing.id):closeModal()},"Mégse"),save));
@@ -893,7 +913,7 @@ function openForm(existing, dateKey, presetSport){
     const allDay=iAllDay.checked;
     const endDate=(iEndDate.value && iEndDate.value>iDate.value)?iEndDate.value:"";
     if(iEndDate.value && iEndDate.value<iDate.value){ err.textContent="Az utolsó nap nem lehet az első nap előtt."; return; }
-    if(!allDay && !endDate && iStart.value && iEnd.value && iEnd.value<iStart.value){ err.textContent="A vége nem lehet a kezdés előtt."; return; }
+    const tp=timeProblem(); if(tp){ err.textContent=""; checkTimes(); timeHint.scrollIntoView({block:"nearest"}); iEnd.focus(); return; }
     const repeating = !!repField && iRep.checked;
     if(repeating && (!iUntil.value || iUntil.value<=iDate.value)){ err.textContent="Az utolsó alkalom legyen későbbi, mint az első."; return; }
     // múltbéli időpont megerősítése (új eseménynél, vagy ha a dátumot múltba tették)
