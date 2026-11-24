@@ -77,7 +77,7 @@
 
   main{padding:20px 24px;display:flex;flex-direction:column;gap:14px;min-width:0}
   .toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-  .toolbar h2{margin:0 8px 0 0;font-size:22px;font-weight:700;letter-spacing:-.01em;text-transform:capitalize;min-width:200px}
+  .toolbar h2{margin:0 8px 0 0;font-size:22px;font-weight:700;letter-spacing:-.01em;min-width:200px}
   .iconbtn{border:1px solid var(--line);background:var(--panel);border-radius:9px;width:36px;height:36px;display:grid;place-items:center}
   .iconbtn:hover{background:var(--soft)}
   .pill{border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:0 14px;height:36px;font-weight:500}
@@ -124,6 +124,9 @@
   .calopt span{font-size:12px;color:var(--muted)}
   .subsec{border-top:1px solid var(--line);padding-top:10px}
   .keyrow input[readonly]{font-size:11px}
+  .list-head{display:block;width:100%;text-align:left;background:none;border:0;padding:14px 18px 2px;font-size:15px;font-weight:700}
+  .list-head.toggle{color:var(--muted);border-top:1px solid var(--line);margin-top:10px;padding-top:14px;cursor:pointer}
+  .list-day.dim,.list-ev.dim{opacity:.6}
   .linkprev{display:block;margin-top:6px;font-size:12.5px;color:var(--swim);word-break:break-all}
   .repeat{background:var(--soft);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
   .chk{display:flex;gap:8px;align-items:center;font-size:13.5px;cursor:pointer}
@@ -395,7 +398,7 @@ function renderUpcoming(){
 /* ---------- main views ---------- */
 function renderTitle(){
   const d=state.cursor;
-  document.getElementById("title").textContent = state.view==="month" ? `${d.getFullYear()}. ${MONTHS[d.getMonth()]}` : "Közelgő edzések";
+  document.getElementById("title").textContent = state.view==="month" ? `${d.getFullYear()}. ${MONTHS[d.getMonth()]}` : "Összes esemény";
   document.getElementById("vMonth").setAttribute("aria-pressed",state.view==="month");
   document.getElementById("vList").setAttribute("aria-pressed",state.view==="list");
   ["prev","next","todayBtn"].forEach(id=>document.getElementById(id).style.visibility = state.view==="month"?"visible":"hidden");
@@ -438,21 +441,41 @@ function renderMonth(){
 function renderList(){
   const view=document.getElementById("view"); view.textContent="";
   const t=todayStr();
-  const list=visible().filter(e=>lastDay(e)>=t).sort(sortEv);
+  // lista nézet: minden esemény, szűrés nélkül, dátum szerint
+  const all=state.events.filter(e=>/^\d{4}-\d{2}-\d{2}$/.test(e.date));
+  const upcoming=all.filter(e=>lastDay(e)>=t).sort(sortEv);
+  const past=all.filter(e=>lastDay(e)<t).sort((a,b)=>sortEv(b,a));
   const box=el("div",{class:"list"});
-  if(!state.loaded) box.append(el("div",{class:"empty",style:"padding:16px 18px"},"Betöltés…"));
-  else if(!list.length) box.append(el("div",{class:"empty",style:"padding:16px 18px"},"Nincs tervezett közös edzés a kiválasztott sportágakban. Kattints az „Új közös edzés” gombra!"));
-  let lastDay="";
-  list.forEach(e=>{
-    if(e.date!==lastDay){ box.append(el("div",{class:"list-day"},fmtDayLong(e.date))); lastDay=e.date; }
-    const s=SPORTS[sportOf(e)];
-    const n=(e.attendees||[]).length;
-    box.append(el("button",{class:"list-ev",style:`--bg-c:${s.bg}`,onclick:()=>openDetail(e.id)},
-      el("span",{class:"dot"},s.emoji),
-      el("div",{class:"info"}, el("div",{class:"t"},e.title||s.name),
-        el("div",{class:"m"},[e.sport==="race"&&raceLabel(e), lastDay(e)!==e.date&&("eddig: "+fmtDayShort(lastDay(e))), e.start?(e.start+(e.end?"–"+e.end:"")):"egész nap", e.place, e.distance].filter(Boolean).join(" · ")||s.name)),
-      el("span",{class:"who"}, n? `${n} jön` : "")));
-  });
+  if(!state.loaded){ box.append(el("div",{class:"empty",style:"padding:16px 18px"},"Betöltés…")); view.append(box); return; }
+  const addRows=(target,list,dim)=>{
+    let prevDay="";
+    list.forEach(e=>{
+      if(e.date!==prevDay){ target.append(el("div",{class:"list-day"+(dim?" dim":"")},fmtDayLong(e.date))); prevDay=e.date; }
+      const s=SPORTS[sportOf(e)];
+      const n=(e.attendees||[]).length;
+      const multi=lastDay(e)!==e.date;
+      target.append(el("button",{class:"list-ev"+(dim?" dim":""),style:`--bg-c:${s.bg}`,onclick:()=>openDetail(e.id)},
+        el("span",{class:"dot"},s.emoji),
+        el("div",{class:"info"}, el("div",{class:"t"},e.title||s.name),
+          el("div",{class:"m"},[e.sport==="race"?raceLabel(e):(e.sport==="social"?"Közösségi program":s.name), multi&&("eddig: "+fmtDayShort(lastDay(e))), e.start?(e.start+(e.end?"–"+e.end:"")):"egész nap", e.place, e.distance].filter(Boolean).join(" · "))),
+        el("span",{class:"who"}, n? `${n} jön` : "")));
+    });
+  };
+  box.append(el("div",{class:"list-head"},`Közelgő események (${upcoming.length})`));
+  if(!upcoming.length) box.append(el("div",{class:"empty",style:"padding:6px 18px 14px"},"Nincs közelgő esemény. Vegyél fel egyet a bal oldali gombokkal!"));
+  addRows(box,upcoming,false);
+  if(past.length){
+    const toggle=el("button",{class:"list-head toggle",type:"button"},`▸ Korábbi események (${past.length})`);
+    box.append(toggle);
+    const pastWrap=el("div",{style:"display:none"});
+    toggle.onclick=()=>{
+      const open=pastWrap.style.display==="none";
+      pastWrap.style.display=open?"":"none";
+      toggle.textContent=(open?"▾":"▸")+` Korábbi események (${past.length})`;
+      if(open && !pastWrap.childNodes.length) addRows(pastWrap,past,true);
+    };
+    box.append(pastWrap);
+  }
   view.append(box);
 }
 function renderAll(){
